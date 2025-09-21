@@ -25,7 +25,7 @@ class ApiClient {
     const url = this.baseUrl ? `${this.baseUrl}${normalizedEndpoint}` : normalizedEndpoint
 
     const opts: RequestInit = {
-      // IMPORTANT: include credentials so browser sends httpOnly auth cookie
+      // include credentials so browser sends httpOnly auth cookie when needed
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
@@ -93,19 +93,20 @@ class ApiClient {
   async searchPhotographers(filters: {
     location?: string
     specialty?: string
-    priceRange?: string
-    availability?: string
+    minPrice?: number
+    maxPrice?: number
     page?: number
     limit?: number
   }) {
     const params = new URLSearchParams()
-    Object.entries(filters).forEach(([key, value]) => {
-      if (value !== undefined && value !== "") {
-        params.append(key, value.toString())
-      }
-    })
+    if (filters.location) params.set("location", String(filters.location))
+    if (filters.specialty) params.set("specialty", String(filters.specialty))
+    if (filters.minPrice != null) params.set("minPrice", String(filters.minPrice))
+    if (filters.maxPrice != null) params.set("maxPrice", String(filters.maxPrice))
+    if (filters.page) params.set("page", String(filters.page))
+    if (filters.limit) params.set("limit", String(filters.limit))
 
-    return this.request(`/photographers?${params.toString()}`)
+    return await this.request(`/photographers?${params.toString()}`)
   }
 
   async getPhotographer(id: string) {

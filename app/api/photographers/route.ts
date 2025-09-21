@@ -1,134 +1,116 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { z } from "zod"
+import { prisma } from "../../../lib/prisma"
 
-const searchSchema = z.object({
-  location: z.string().optional(),
-  specialty: z.string().optional(),
-  priceRange: z.string().optional(),
-  availability: z.string().optional(),
-  page: z
-    .string()
-    .optional()
-    .transform((val) => (val ? Number.parseInt(val) : 1)),
-  limit: z
-    .string()
-    .optional()
-    .transform((val) => (val ? Number.parseInt(val) : 12)),
-})
-
-// Mock photographer data
-const mockPhotographers = [
-  {
-    id: "1",
-    firstName: "Sarah",
-    lastName: "Chen",
-    email: "sarah@example.com",
-    specialty: "Wedding Photography",
-    location: "San Francisco, CA",
-    latitude: 37.7749,
-    longitude: -122.4194,
-    hourlyRate: 150,
-    rating: 4.9,
-    reviewCount: 127,
-    bio: "Professional wedding photographer with 8+ years of experience capturing love stories.",
-    profileImage: "/professional-photographer-woman-portrait.png",
-    portfolioImages: ["/wedding-photography-couple-dancing.png", "/wedding-photography-portfolio.png"],
-    isAvailable: true,
-    createdAt: "2023-01-15T00:00:00Z",
-  },
-  {
-    id: "2",
-    firstName: "Marcus",
-    lastName: "Rodriguez",
-    email: "marcus@example.com",
-    specialty: "Fashion Photography",
-    location: "New York, NY",
-    latitude: 40.7128,
-    longitude: -74.006,
-    hourlyRate: 200,
-    rating: 4.8,
-    reviewCount: 89,
-    bio: "Fashion and portrait photographer specializing in editorial and commercial work.",
-    profileImage: "/professional-photographer-man-portrait.png",
-    portfolioImages: ["/fashion-photography-model-portrait.png", "/fashion-photography-portfolio.png"],
-    isAvailable: true,
-    createdAt: "2023-02-20T00:00:00Z",
-  },
-  {
-    id: "3",
-    firstName: "Emily",
-    lastName: "Johnson",
-    email: "emily@example.com",
-    specialty: "Event Photography",
-    location: "Los Angeles, CA",
-    latitude: 34.0522,
-    longitude: -118.2437,
-    hourlyRate: 120,
-    rating: 5.0,
-    reviewCount: 156,
-    bio: "Event photographer capturing corporate gatherings, parties, and special occasions.",
-    profileImage: "/professional-photographer-woman-with-camera.png",
-    portfolioImages: ["/event-photography-corporate-gathering.png", "/event-photography-portfolio.png"],
-    isAvailable: false,
-    createdAt: "2023-03-10T00:00:00Z",
-  },
-]
+export const runtime = "nodejs"
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const params = Object.fromEntries(searchParams.entries())
-    const { location, specialty, priceRange, availability, page, limit } = searchSchema.parse(params)
+    const url = new URL(request.url)
+    const q = url.searchParams
 
-    // Filter photographers based on search criteria
-    let filteredPhotographers = [...mockPhotographers]
+    const page = Math.max(1, parseInt(q.get("page") || "1"))
+    const limit = Math.max(1, Math.min(100, parseInt(q.get("limit") || "12")))
+    const search = q.get("q") || undefined
+    const specialty = q.get("specialty") || undefined
+    const location = q.get("location") || undefined
+    const minPrice = q.get("minPrice")
+    const maxPrice = q.get("maxPrice")
 
-    if (location) {
-      filteredPhotographers = filteredPhotographers.filter((p) =>
-        p.location.toLowerCase().includes(location.toLowerCase()),
-      )
-    }
+    // base filter: only photographers
+    const where: any = { role: "PHOTOGRAPHER" }
+    const and: any[] = []
 
+    // keep existing filters
     if (specialty) {
-      filteredPhotographers = filteredPhotographers.filter((p) =>
-        p.specialty.toLowerCase().includes(specialty.toLowerCase()),
-      )
-    }
-
-    if (priceRange) {
-      const [min, max] = priceRange.split("-").map(Number)
-      filteredPhotographers = filteredPhotographers.filter((p) => {
-        if (max) {
-          return p.hourlyRate >= min && p.hourlyRate <= max
-        }
-        return p.hourlyRate >= min
+      and.push({
+        OR: [
+          { specialty: { contains: specialty } },
+          { photographerProfile: { is: { specialty: { contains: specialty } } } },
+        ],
       })
     }
 
-    if (availability === "today" || availability === "week") {
-      filteredPhotographers = filteredPhotographers.filter((p) => p.isAvailable)
+    if (location) {
+      and.push({ photographerProfile: { is: { location: { contains: location } } } })
     }
 
-    // Pagination
-    const startIndex = (page - 1) * limit
-    const endIndex = startIndex + limit
-    const paginatedPhotographers = filteredPhotographers.slice(startIndex, endIndex)
+    if (minPrice || maxPrice) {
+      const priceFilter: any = {}
+      if (minPrice) priceFilter.gte = Number(minPrice)
+      if (maxPrice) priceFilter.lte = Number(maxPrice)
+      and.push({ photographerProfile: { is: { hourlyRate: priceFilter } } })
+    }
+
+    // fuzzy global search across multiple fields (main search box)
+    if (search) {
+      const s = search.trim()
+      if (s.length) {
+        and.push({
+          OR: [
+            { firstName: { contains: s } },
+            { lastName: { contains: s } },
+            { email: { contains: s } },
+            { specialty: { contains: s } },
+            { photographerProfile: { is: { specialty: { contains: s } } } },
+            { photographerProfile: { is: { bio: { contains: s } } } },
+            { photographerProfile: { is: { location: { contains: s } } } },
+            // portfolio captions/categories
+            { photographerProfile: { is: { portfolio: { some: { caption: { contains: s } } } } } },
+            { photographerProfile: { is: { portfolio: { some: { category: { contains: s } } } } } },
+          ],
+        })
+      }
+    }
+
+    if (and.length) where.AND = and
+
+    // count + page
+    const total = await prisma.user.count({ where })
+
+    const users = await prisma.user.findMany({
+      where,
+      include: {
+        photographerProfile: {
+          include: {
+            portfolio: {
+              take: 1,
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        },
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+    })
+
+    const photographers = users.map((u) => {
+      const profile = u.photographerProfile as any
+      const firstImage = profile?.portfolio?.[0]?.url || null
+      return {
+        id: u.id,
+        first_name: u.firstName,
+        last_name: u.lastName,
+        specialty: profile?.specialty ?? u.specialty ?? null,
+        location: profile?.location ?? null,
+        hourly_rate: profile?.hourlyRate ?? null,
+        rating_average: 0,
+        rating_count: 0,
+        profile_image_url: firstImage ?? "/placeholder.svg",
+        is_available: true,
+      }
+    })
+
+    const totalPages = Math.ceil(total / limit)
 
     return NextResponse.json({
-      photographers: paginatedPhotographers,
-      pagination: {
-        page,
-        limit,
-        total: filteredPhotographers.length,
-        totalPages: Math.ceil(filteredPhotographers.length / limit),
-      },
+      photographers,
+      pagination: { page, limit, total, totalPages },
     })
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
-    }
-
-    console.error("Search photographers error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } catch (err: any) {
+    console.error("GET /api/photographers error:", err)
+    const payload: any = { error: err?.message || "Internal server error" }
+    if (process.env.NODE_ENV !== "production") payload.stack = err?.stack
+    return NextResponse.json(payload, { status: 500 })
   }
 }

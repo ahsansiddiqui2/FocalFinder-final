@@ -17,10 +17,11 @@ import { Camera, Upload, Plus, Edit, Trash2, Eye, Calendar, DollarSign, Loader2 
 
 interface PortfolioItem {
   id: string
-  image_url: string
-  title: string
-  category: string
-  is_featured: boolean
+  url: string
+  caption?: string | null
+  category?: string | null
+  isFeatured?: boolean
+  createdAt?: string
 }
 
 interface ServicePackage {
@@ -52,6 +53,7 @@ export default function PhotographerProfilePage() {
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([])
   const [servicePackages, setServicePackages] = useState<ServicePackage[]>([])
   const [orders, setOrders] = useState<Order[]>([])
+  const [uploading, setUploading] = useState(false)
 
   // Profile form state
   const [profileData, setProfileData] = useState({
@@ -64,6 +66,18 @@ export default function PhotographerProfilePage() {
     travelDistance: "",
   })
 
+  // Service packages: load/create/update/delete
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newPackage, setNewPackage] = useState({
+    name: "",
+    description: "",
+    price: "",
+    duration_hours: "",
+    features: "",
+    is_active: true,
+  })
+  const [editingPackageId, setEditingPackageId] = useState<string | null>(null)
+
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "photographer")) {
       router.push("/login")
@@ -72,73 +86,34 @@ export default function PhotographerProfilePage() {
 
     if (user && user.role === "photographer") {
       loadProfileData()
+      loadPortfolioItems()
+      loadServicePackages()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, authLoading, router])
 
   const loadProfileData = async () => {
     setLoading(true)
     try {
-      // Mock data - replace with actual API calls
-      setPortfolioItems([
-        {
-          id: "1",
-          image_url: "/wedding-photography-couple-dancing.png",
-          title: "Romantic Wedding Ceremony",
-          category: "Wedding",
-          is_featured: true,
-        },
-        {
-          id: "2",
-          image_url: "/fashion-photography-model-portrait.png",
-          title: "Fashion Portrait Session",
-          category: "Fashion",
-          is_featured: false,
-        },
-      ])
-
-      setServicePackages([
-        {
-          id: "1",
-          name: "Basic Wedding Package",
-          description: "Perfect for intimate ceremonies",
-          price: 800,
-          duration_hours: 4,
-          features: ["4 hours coverage", "200+ edited photos", "Online gallery"],
-          is_active: true,
-        },
-        {
-          id: "2",
-          name: "Premium Wedding Package",
-          description: "Complete wedding day coverage",
-          price: 1800,
-          duration_hours: 8,
-          features: ["8 hours coverage", "600+ edited photos", "Second photographer", "USB drive"],
-          is_active: true,
-        },
-      ])
-
-      setOrders([
-        {
-          id: "1",
-          client_name: "Jessica & Mike",
-          event_type: "Wedding",
-          event_date: "2024-06-15",
-          event_time: "14:00",
-          location: "San Francisco, CA",
-          status: "confirmed",
-          total_amount: 1200,
-        },
-        {
-          id: "2",
-          client_name: "Amanda Rodriguez",
-          event_type: "Portrait Session",
-          event_date: "2024-05-20",
-          event_time: "10:00",
-          location: "Golden Gate Park",
-          status: "completed",
-          total_amount: 400,
-        },
-      ])
+      const res = await fetch("/api/photographer/profile", { credentials: "include" })
+      const json = await res.json()
+      if (json?.user) {
+        setProfileData((prev) => ({
+          ...prev,
+          specialty: json.user.specialty ?? "",
+        }))
+      }
+      if (json?.profile) {
+        setProfileData((prev) => ({
+          ...prev,
+          bio: json.profile.bio ?? "",
+          location: json.profile.location ?? "",
+          hourlyRate: json.profile.hourlyRate ? String(json.profile.hourlyRate) : "",
+          yearsExperience: json.profile.yearsExperience ? String(json.profile.yearsExperience) : "",
+          equipment: json.profile.equipment ?? "",
+          travelDistance: json.profile.travelDistance ?? "",
+        }))
+      }
     } catch (error) {
       console.error("Failed to load profile data:", error)
     } finally {
@@ -146,25 +121,249 @@ export default function PhotographerProfilePage() {
     }
   }
 
+  const loadPortfolioItems = async () => {
+    try {
+      const res = await fetch("/api/photographer/portfolio", { credentials: "include" })
+      const json = await res.json()
+      if (res.ok && Array.isArray(json.items)) {
+        setPortfolioItems(
+          json.items.map((it: any) => ({
+            id: it.id,
+            url: it.url,
+            caption: it.caption ?? "",
+            category: it.category ?? "",
+            isFeatured: Boolean(it.isFeatured),
+            createdAt: it.createdAt,
+          }))
+        )
+      } else {
+        console.error("Failed to fetch portfolio items:", json)
+      }
+    } catch (err) {
+      console.error("Error loading portfolio items:", err)
+    }
+  }
+
+  const loadServicePackages = async () => {
+    try {
+      const res = await fetch("/api/photographer/packages", { credentials: "include" })
+      const json = await res.json()
+      if (res.ok && Array.isArray(json.items)) {
+        setServicePackages(
+          json.items.map((it: any) => ({
+            id: it.id,
+            name: it.name,
+            description: it.description ?? "",
+            price: it.price ?? 0,
+            duration_hours: it.duration_hours ?? 0,
+            features: Array.isArray(it.features) ? it.features : [],
+            is_active: Boolean(it.is_active),
+          }))
+        )
+      } else {
+        console.error("Failed to fetch service packages:", json)
+      }
+    } catch (err) {
+      console.error("Error loading packages:", err)
+    }
+  }
+
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
-      // TODO: Implement profile update API call
-      console.log("Updating profile:", profileData)
-      // Mock success
-      setTimeout(() => setLoading(false), 1000)
+      const payload = {
+        bio: profileData.bio || null,
+        specialty: profileData.specialty || null,
+        location: profileData.location || null,
+        hourlyRate: profileData.hourlyRate !== "" ? Number(profileData.hourlyRate) : null,
+        yearsExperience: profileData.yearsExperience !== "" ? Number(profileData.yearsExperience) : null,
+        equipment: profileData.equipment || null,
+        travelDistance: profileData.travelDistance || null,
+      }
+
+      const res = await fetch("/api/photographer/profile", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        console.error("Profile update failed:", json)
+      } else {
+        if (json.profile) {
+          setProfileData((prev) => ({
+            ...prev,
+            bio: json.profile.bio ?? prev.bio,
+            specialty: json.profile.specialty ?? prev.specialty,
+            location: json.profile.location ?? prev.location,
+            hourlyRate: json.profile.hourlyRate ? String(json.profile.hourlyRate) : prev.hourlyRate,
+            yearsExperience: json.profile.yearsExperience ? String(json.profile.yearsExperience) : prev.yearsExperience,
+            equipment: json.profile.equipment ?? prev.equipment,
+            travelDistance: json.profile.travelDistance ?? prev.travelDistance,
+          }))
+        }
+      }
     } catch (error) {
       console.error("Failed to update profile:", error)
+    } finally {
       setLoading(false)
     }
   }
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (files) {
-      // TODO: Implement image upload logic
-      console.log("Uploading images:", files)
+    if (!files || files.length === 0) return
+    setUploading(true)
+    try {
+      const uploaded: PortfolioItem[] = []
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const fd = new FormData()
+        fd.append("file", file)
+        // optional: you can add caption/category/isFeatured fields here
+        fd.append("caption", file.name)
+        // send request
+        const res = await fetch("/api/photographer/portfolio", {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        })
+        const json = await res.json()
+        if (res.ok && json.item) {
+          uploaded.push({
+            id: json.item.id,
+            url: json.item.url,
+            caption: json.item.caption ?? "",
+            category: json.item.category ?? "",
+            isFeatured: Boolean(json.item.isFeatured),
+            createdAt: json.item.createdAt,
+          })
+        } else {
+          console.error("Upload failed for file", file.name, json)
+        }
+      }
+      if (uploaded.length) {
+        setPortfolioItems((prev) => [...uploaded, ...prev])
+      }
+      // clear input value to allow re-upload of same file if needed
+      ;(e.target as HTMLInputElement).value = ""
+    } catch (err) {
+      console.error("Image upload error:", err)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleCreatePackage = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    const payload = {
+      name: newPackage.name,
+      description: newPackage.description || undefined,
+      price: newPackage.price === "" ? null : Number(newPackage.price),
+      duration_hours: newPackage.duration_hours === "" ? null : Number(newPackage.duration_hours),
+      features: newPackage.features ? newPackage.features.split(",").map((s) => s.trim()) : undefined,
+      is_active: Boolean(newPackage.is_active),
+    }
+    try {
+      const res = await fetch("/api/photographer/packages", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json()
+      if (res.ok && json.item) {
+        setServicePackages((prev) => [json.item, ...prev])
+        setNewPackage({ name: "", description: "", price: "", duration_hours: "", features: "", is_active: true })
+        setShowAddForm(false)
+      } else {
+        console.error("Create package failed:", json)
+      }
+    } catch (err) {
+      console.error("Create package error:", err)
+    }
+  }
+
+  const handleStartEdit = (pkg: ServicePackage) => {
+    setEditingPackageId(pkg.id)
+    setNewPackage({
+      name: pkg.name,
+      description: pkg.description ?? "",
+      price: String(pkg.price ?? ""),
+      duration_hours: String(pkg.duration_hours ?? ""),
+      features: (pkg.features || []).join(", "),
+      is_active: pkg.is_active,
+    })
+    setShowAddForm(true)
+  }
+
+  const handleUpdatePackage = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    if (!editingPackageId) return
+    const payload = {
+      name: newPackage.name,
+      description: newPackage.description || null,
+      price: newPackage.price === "" ? null : Number(newPackage.price),
+      duration_hours: newPackage.duration_hours === "" ? null : Number(newPackage.duration_hours),
+      features: newPackage.features ? newPackage.features.split(",").map((s) => s.trim()) : null,
+      is_active: Boolean(newPackage.is_active),
+    }
+    try {
+      const res = await fetch(`/api/photographer/packages/${editingPackageId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json()
+      if (res.ok && json.item) {
+        setServicePackages((prev) => prev.map((p) => (p.id === json.item.id ? json.item : p)))
+        setEditingPackageId(null)
+        setNewPackage({ name: "", description: "", price: "", duration_hours: "", features: "", is_active: true })
+        setShowAddForm(false)
+      } else {
+        console.error("Update package failed:", json)
+      }
+    } catch (err) {
+      console.error("Update package error:", err)
+    }
+  }
+
+  const handleDeletePackage = async (id: string) => {
+    if (!confirm("Delete this package?")) return
+    try {
+      const res = await fetch(`/api/photographer/packages/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setServicePackages((prev) => prev.filter((p) => p.id !== id))
+      } else {
+        console.error("Delete package failed:", json)
+      }
+    } catch (err) {
+      console.error("Delete package error:", err)
+    }
+  }
+
+  const handleDeleteItem = async (id: string) => {
+    if (!confirm("Delete this portfolio item?")) return
+    try {
+      const res = await fetch(`/api/photographer/portfolio/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      })
+      const json = await res.json()
+      if (res.ok && json.success) {
+        setPortfolioItems((prev) => prev.filter((p) => p.id !== id))
+      } else {
+        console.error("Failed to delete item:", json)
+      }
+    } catch (err) {
+      console.error("Delete error:", err)
     }
   }
 
@@ -212,11 +411,10 @@ export default function PhotographerProfilePage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
-                activeTab === tab.id
+              className={`flex items-center gap-2 px-4 py-2 font-medium text-sm border-b-2 transition-colors ${activeTab === tab.id
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
+                }`}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
@@ -321,10 +519,10 @@ export default function PhotographerProfilePage() {
                       className="hidden"
                       id="portfolio-upload"
                     />
-                    <Button asChild variant="outline">
+                    <Button asChild variant="outline" disabled={uploading}>
                       <label htmlFor="portfolio-upload" className="cursor-pointer">
                         <Upload className="w-4 h-4 mr-2" />
-                        Upload Images
+                        {uploading ? "Uploading..." : "Upload Images"}
                       </label>
                     </Button>
                   </div>
@@ -336,8 +534,8 @@ export default function PhotographerProfilePage() {
                     <div key={item.id} className="relative group">
                       <div className="aspect-square bg-muted rounded-lg overflow-hidden">
                         <img
-                          src={item.image_url || "/placeholder.svg"}
-                          alt={item.title}
+                          src={item.url || "/placeholder.svg"}
+                          alt={item.caption || "Portfolio image"}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                       </div>
@@ -349,18 +547,18 @@ export default function PhotographerProfilePage() {
                           <Button size="sm" variant="secondary">
                             <Edit className="w-4 h-4" />
                           </Button>
-                          <Button size="sm" variant="destructive">
+                          <Button size="sm" variant="destructive" onClick={() => handleDeleteItem(item.id)}>
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
                       </div>
                       <div className="mt-2">
-                        <h4 className="font-medium text-sm">{item.title}</h4>
+                        <h4 className="font-medium text-sm">{item.caption ?? "Untitled"}</h4>
                         <div className="flex items-center justify-between mt-1">
                           <Badge variant="secondary" className="text-xs">
-                            {item.category}
+                            {item.category ?? "Uncategorized"}
                           </Badge>
-                          {item.is_featured && <Badge className="text-xs bg-primary">Featured</Badge>}
+                          {item.isFeatured && <Badge className="text-xs bg-primary">Featured</Badge>}
                         </div>
                       </div>
                     </div>
@@ -381,13 +579,50 @@ export default function PhotographerProfilePage() {
                     <CardTitle>Service Packages</CardTitle>
                     <CardDescription>Create and manage your photography service packages</CardDescription>
                   </div>
-                  <Button className="bg-primary hover:bg-primary/90">
+                  <Button className="bg-primary hover:bg-primary/90" onClick={() => { setShowAddForm((s) => !s); setEditingPackageId(null) }}>
                     <Plus className="w-4 h-4 mr-2" />
-                    Add Package
+                    {showAddForm ? "Close" : "Add Package"}
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
+                {showAddForm && (
+                  <form onSubmit={editingPackageId ? handleUpdatePackage : handleCreatePackage} className="space-y-4 mb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="pkg-name">Name</Label>
+                        <Input id="pkg-name" value={newPackage.name} onChange={(e) => setNewPackage({ ...newPackage, name: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label htmlFor="pkg-price">Price</Label>
+                        <Input id="pkg-price" type="number" value={newPackage.price} onChange={(e) => setNewPackage({ ...newPackage, price: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label htmlFor="pkg-duration">Duration (hours)</Label>
+                        <Input id="pkg-duration" type="number" value={newPackage.duration_hours} onChange={(e) => setNewPackage({ ...newPackage, duration_hours: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label htmlFor="pkg-active">Active</Label>
+                        <div className="mt-1">
+                          <input id="pkg-active" type="checkbox" checked={newPackage.is_active} onChange={(e) => setNewPackage({ ...newPackage, is_active: e.target.checked })} />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="pkg-desc">Description</Label>
+                      <Textarea id="pkg-desc" value={newPackage.description} onChange={(e) => setNewPackage({ ...newPackage, description: e.target.value })} rows={3} />
+                    </div>
+                    <div>
+                      <Label htmlFor="pkg-features">Features (comma separated)</Label>
+                      <Input id="pkg-features" value={newPackage.features} onChange={(e) => setNewPackage({ ...newPackage, features: e.target.value })} />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="submit" className="bg-primary">{editingPackageId ? "Update Package" : "Create Package"}</Button>
+                      <Button type="button" variant="outline" onClick={() => { setShowAddForm(false); setEditingPackageId(null) }}>Cancel</Button>
+                    </div>
+                  </form>
+                )}
+
                 <div className="space-y-4">
                   {servicePackages.map((pkg) => (
                     <div key={pkg.id} className="border rounded-lg p-6">
@@ -397,34 +632,35 @@ export default function PhotographerProfilePage() {
                           <p className="text-muted-foreground">{pkg.description}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge
-                            className={pkg.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}
-                          >
+                          <Badge className={pkg.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
                             {pkg.is_active ? "Active" : "Inactive"}
                           </Badge>
-                          <Button size="sm" variant="outline">
+                          <Button size="sm" variant="outline" onClick={() => handleStartEdit(pkg)}>
                             <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => handleDeletePackage(pkg.id)}>
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div>
                           <span className="text-sm text-muted-foreground">Price</span>
-                          <p className="text-xl font-bold">${pkg.price}</p>
+                          <p className="text-xl font-bold">${pkg.price ?? 0}</p>
                         </div>
                         <div>
                           <span className="text-sm text-muted-foreground">Duration</span>
-                          <p className="font-medium">{pkg.duration_hours} hours</p>
+                          <p className="font-medium">{pkg.duration_hours ?? 0} hours</p>
                         </div>
                         <div>
                           <span className="text-sm text-muted-foreground">Features</span>
-                          <p className="font-medium">{pkg.features.length} included</p>
+                          <p className="font-medium">{(pkg.features || []).length} included</p>
                         </div>
                       </div>
                       <div>
                         <span className="text-sm text-muted-foreground">Included Features:</span>
                         <ul className="mt-1 space-y-1">
-                          {pkg.features.map((feature, index) => (
+                          {(pkg.features || []).map((feature, index) => (
                             <li key={index} className="text-sm flex items-center gap-2">
                               <div className="w-1.5 h-1.5 bg-primary rounded-full" />
                               {feature}
