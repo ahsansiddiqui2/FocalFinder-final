@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
+import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import { z } from "zod"
+import { prisma } from "../../../../lib/prisma"
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -15,60 +17,49 @@ export async function POST(request: NextRequest) {
 
     const { email, password } = loginSchema.parse(body)
 
-    // TODO: Replace with actual database query
-    // const user = await getUserByEmail(email)
-    const mockUser = {
-      id: "1",
-      email: "user@example.com",
-      password: "$2a$10$hashedpassword", // This would be hashed in real implementation
-      firstName: "John",
-      lastName: "Doe",
-      role: "client",
-    }
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        specialty: true,
+      },
+    })
 
-    if (!mockUser || mockUser.email !== email) {
-      console.log("[v0] User not found or email mismatch")
+    if (!user) {
+      console.log("[v0] User not found")
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
     }
 
-    // TODO: Replace with actual password verification
-    // const isValidPassword = await bcrypt.compare(password, user.password)
-    const isValidPassword = password === "password" // Mock validation
-    console.log("[v0] Password valid:", isValidPassword)
-
-    if (!isValidPassword) {
+    const isValid = await bcrypt.compare(password, user.password)
+    if (!isValid) {
       console.log("[v0] Invalid password")
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
     }
 
-    const jwtSecret = process.env.JWT_SECRET || "fallback-secret-key-for-development"
-    console.log("[v0] Generating JWT with secret:", jwtSecret ? "Set" : "Not set")
+    const jwtSecret = process.env.JWT_SECRET
+    if (!jwtSecret) {
+      console.error("JWT_SECRET not set")
+      return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 })
+    }
 
-    // Generate JWT token
-    const token = jwt.sign({ userId: mockUser.id, email: mockUser.email, role: mockUser.role }, jwtSecret, {
+    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, jwtSecret, {
       expiresIn: "7d",
     })
 
-    console.log("[v0] JWT token generated successfully")
+    const { password: _p, ...publicUser } = user
 
-    // Create response with user data
-    const response = NextResponse.json({
-      user: {
-        id: mockUser.id,
-        email: mockUser.email,
-        firstName: mockUser.firstName,
-        lastName: mockUser.lastName,
-        role: mockUser.role,
-      },
-      token,
-    })
-
-    // Set HTTP-only cookie
+    const response = NextResponse.json({ user: publicUser, token })
     response.cookies.set("auth-token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60, // 7 days
+      maxAge: 7 * 24 * 60 * 60,
+      path: "/",
     })
 
     console.log("[v0] Login successful, returning user data")
@@ -79,7 +70,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
     }
 
-    console.error("[v0] Login error:", error)
+    console.error("Login error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

@@ -1,23 +1,33 @@
 import { type NextRequest, NextResponse } from "next/server"
+import jwt from "jsonwebtoken"
+import { prisma } from "../../../../lib/prisma"
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[v0] Auth/me endpoint called - simplified version")
+    const token = request.cookies.get("auth-token")?.value
+    if (!token) return NextResponse.json({ user: null }, { status: 200 })
 
-    const mockUser = {
-      id: "1",
-      email: "test@example.com",
-      firstName: "Test",
-      lastName: "User",
-      role: "client",
+    const jwtSecret = process.env.JWT_SECRET
+    if (!jwtSecret) {
+      console.error("JWT_SECRET not set")
+      return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 })
     }
 
-    console.log("[v0] Returning mock user data:", mockUser)
-    return NextResponse.json({
-      user: mockUser,
+    let payload: any
+    try {
+      payload = jwt.verify(token, jwtSecret)
+    } catch (err) {
+      return NextResponse.json({ user: null }, { status: 200 })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, specialty: true },
     })
+
+    return NextResponse.json({ user: user ?? null }, { status: 200 })
   } catch (error) {
-    console.error("[v0] Auth verification error:", error)
+    console.error("Auth/me error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

@@ -34,6 +34,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // normalize role from server (e.g. "PHOTOGRAPHER") to client-friendly lowercase
+  const normalizeUser = (u: any): User | null => {
+    if (!u) return null
+    return {
+      ...u,
+      role: String(u.role).toLowerCase() as "client" | "photographer" | "admin",
+    }
+  }
+
   const refreshUser = async () => {
     try {
       console.log("[v0] Refreshing user data...")
@@ -45,8 +54,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("[v0] getCurrentUser response:", response)
 
       if (response.data?.user) {
-        setUser(response.data.user)
-        console.log("[v0] User set:", response.data.user)
+        const normalized = normalizeUser(response.data.user)
+        setUser(normalized)
+        console.log("[v0] User set:", normalized)
       } else {
         console.log("[v0] No user data, setting to null")
         setUser(null)
@@ -63,7 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await apiClient.login(email, password)
       if (response.data?.user) {
-        setUser(response.data.user)
+        setUser(normalizeUser(response.data.user))
         return { success: true }
       } else {
         return { success: false, error: response.error || "Login failed" }
@@ -84,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await apiClient.signup(userData)
       if (response.data?.user) {
-        setUser(response.data.user)
+        setUser(normalizeUser(response.data.user))
         return { success: true }
       } else {
         return { success: false, error: response.error || "Signup failed" }

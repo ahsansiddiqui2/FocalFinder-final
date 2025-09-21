@@ -10,46 +10,42 @@ class ApiClient {
   private baseUrl: string
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || ""
+    // keep baseUrl empty to use relative paths in dev/production if NEXT_PUBLIC_API_URL not set
+    this.baseUrl = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+    // normalize endpoint so it always targets /api/... on the same origin when baseUrl is empty
+    const normalizedEndpoint = endpoint.startsWith("/api")
+      ? endpoint
+      : endpoint.startsWith("/")
+      ? `/api${endpoint}`
+      : `/api/${endpoint}`
+
+    const url = this.baseUrl ? `${this.baseUrl}${normalizedEndpoint}` : normalizedEndpoint
+
+    const opts: RequestInit = {
+      // IMPORTANT: include credentials so browser sends httpOnly auth cookie
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    }
+
     try {
-      const url = `${this.baseUrl}/api${endpoint}`
-      const config: RequestInit = {
-        headers: {
-          "Content-Type": "application/json",
-          ...options.headers,
-        },
-        credentials: "include", // Include cookies for authentication
-        ...options,
+      const res = await fetch(url, opts)
+      const text = await res.text()
+      const json = text ? JSON.parse(text) : {}
+
+      if (!res.ok) {
+        return { error: json?.error || json?.message || res.statusText }
       }
 
-      console.log("[v0] Making API request to:", url)
-      const response = await fetch(url, config)
-      console.log("[v0] Response status:", response.status, response.statusText)
-
-      const contentType = response.headers.get("content-type")
-      console.log("[v0] Response content-type:", contentType)
-
-      if (!contentType || !contentType.includes("application/json")) {
-        // If it's not JSON, get the text to see what the actual error is
-        const text = await response.text()
-        console.error("[v0] Non-JSON response received:", text.substring(0, 200))
-        return { error: `Server returned non-JSON response: ${response.status} ${response.statusText}` }
-      }
-
-      const data = await response.json()
-      console.log("[v0] Parsed JSON data:", data)
-
-      if (!response.ok) {
-        return { error: data.error || "An error occurred" }
-      }
-
-      return { data }
-    } catch (error) {
-      console.error("[v0] API request failed:", error)
-      return { error: "Network error occurred" }
+      return { data: json }
+    } catch (err: any) {
+      return { error: err?.message || "Network error" }
     }
   }
 
