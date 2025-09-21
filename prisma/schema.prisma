@@ -1,0 +1,170 @@
+
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  PHOTOGRAPHER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  DECLINED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String   @unique
+  password  String
+  role      Role     @default(CLIENT)
+  specialty String?
+  createdAt DateTime @default(now())
+
+  // relations
+  photographerProfile PhotographerProfile?
+  portfolios          PortfolioItem[]           @ignore // accessed via profile
+  briefs              Brief[]                   @relation("ClientBriefs")
+  bookingsAsClient    Booking[]                 @relation("ClientBookings")
+  bookingsAsPhotog    Booking[]                 @relation("PhotographerBookings")
+  conversations       ConversationParticipant[]
+  messages            Message[]                 @relation("MessageSender")
+  reviews             Review[]                  @relation("Reviewer")
+  refreshTokens       RefreshToken[]
+}
+
+model PhotographerProfile {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id])
+  bio        String?
+  location   String?
+  latitude   Float?
+  longitude  Float?
+  styles     Json?
+  hourlyRate Decimal? @db.Decimal(10, 2)
+  rating     Float?   @default(0)
+  createdAt  DateTime @default(now())
+
+  portfolio PortfolioItem[]
+}
+
+model PortfolioItem {
+  id        String              @id @default(uuid())
+  profileId String
+  profile   PhotographerProfile @relation(fields: [profileId], references: [id])
+  url       String
+  publicId  String?
+  caption   String?
+  width     Int?
+  height    Int?
+  createdAt DateTime            @default(now())
+  User      User?               @relation(fields: [userId], references: [id])
+  userId    String?
+}
+
+model Brief {
+  id          String    @id @default(uuid())
+  clientId    String
+  client      User      @relation("ClientBriefs", fields: [clientId], references: [id])
+  title       String
+  description String
+  dateFrom    DateTime?
+  dateTo      DateTime?
+  location    Json?
+  budget      Decimal?  @db.Decimal(10, 2)
+  createdAt   DateTime  @default(now())
+
+  bookings Booking[]
+}
+
+model Booking {
+  id             String        @id @default(uuid())
+  briefId        String?
+  brief          Brief?        @relation(fields: [briefId], references: [id])
+  photographerId String
+  photographer   User          @relation("PhotographerBookings", fields: [photographerId], references: [id])
+  clientId       String
+  client         User          @relation("ClientBookings", fields: [clientId], references: [id])
+  startAt        DateTime
+  endAt          DateTime
+  status         BookingStatus @default(PENDING)
+  price          Decimal       @db.Decimal(10, 2)
+  paymentId      String?
+  createdAt      DateTime      @default(now())
+
+  conversation Conversation?
+  review       Review?
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  provider          String
+  providerPaymentId String   @unique
+  amount            Decimal  @db.Decimal(12, 2)
+  currency          String
+  status            String
+  metadata          Json?
+  createdAt         DateTime @default(now())
+}
+
+model Conversation {
+  id           String                    @id @default(uuid())
+  bookingId    String?                   @unique
+  booking      Booking?                  @relation(fields: [bookingId], references: [id])
+  participants ConversationParticipant[]
+  messages     Message[]
+  createdAt    DateTime                  @default(now())
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       String
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id])
+  text           String
+  attachments    Json?
+  createdAt      DateTime     @default(now())
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  bookingId  String   @unique
+  booking    Booking  @relation(fields: [bookingId], references: [id])
+  reviewerId String
+  reviewer   User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  rating     Int      @db.SmallInt
+  comment    String?
+  createdAt  DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
