@@ -56,11 +56,19 @@ export function PhotographerCard({ photographer }: PhotographerCardProps) {
           </div>
         </div>
 
-        {/* Rating and Reviews */}
+        {/* Rating and Reviews (uses reviews to render stars) */}
         <div className="flex items-center gap-2 mb-4">
           <div className="flex items-center gap-1">
-            <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-            <span className="font-medium">{photographer.rating}</span>
+            {[...Array(5)].map((_, i) => {
+              const filled = i < Math.round(Number(photographer.rating || 0))
+              return (
+                <Star
+                  key={i}
+                  className={`w-4 h-4 ${filled ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`}
+                />
+              )
+            })}
+            <span className="font-medium ml-2">{Number(photographer.rating || 0).toFixed(1)}</span>
           </div>
           <span className="text-muted-foreground text-sm">({photographer.reviewCount} reviews)</span>
         </div>

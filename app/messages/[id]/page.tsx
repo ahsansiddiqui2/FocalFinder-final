@@ -57,6 +57,8 @@ export default function ConversationPage() {
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -70,111 +72,180 @@ export default function ConversationPage() {
   }, [user, authLoading, params.id, router])
 
   useEffect(() => {
-    scrollToBottom()
+    // scroll chat container to bottom whenever messages change
+    // use requestAnimationFrame to ensure layout is ready
+    requestAnimationFrame(() => {
+      const c = messagesContainerRef.current
+      if (c) {
+        c.scrollTop = c.scrollHeight
+      } else {
+        // fallback to element-based scroll if container not available
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+      }
+    })
   }, [messages])
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    const c = messagesContainerRef.current
+    if (c) {
+      c.scrollTop = c.scrollHeight
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    }
   }
 
-  const loadConversation = async (participantId: string) => {
+  const loadConversation = async (conversationId: string) => {
     setLoading(true)
     try {
-      // Mock data - replace with actual API calls
-      const mockParticipant: Participant = {
-        id: participantId,
-        name: "Sarah Chen",
-        image: "/professional-photographer-woman-portrait.png",
-        role: "photographer",
-        isOnline: true,
-        specialty: "Wedding Photography",
-        location: "San Francisco, CA",
+      const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, { credentials: "include" })
+      const json = await res.json()
+      if (!res.ok) {
+        console.error("Failed to load conversation:", json)
+        setParticipant(null)
+        setMessages([])
+        return
       }
-
-      const mockMessages: Message[] = [
-        {
-          id: "1",
-          senderId: participantId,
-          recipientId: user?.id || "",
-          content:
-            "Hi! Thank you for your interest in my wedding photography services. I'd love to learn more about your special day!",
-          timestamp: "2024-03-15T09:00:00Z",
-          isRead: true,
-          messageType: "text",
-        },
-        {
-          id: "2",
-          senderId: user?.id || "",
-          recipientId: participantId,
-          content:
-            "Hello Sarah! We're planning our wedding for June 15th in San Francisco. We love your portfolio and would like to discuss packages.",
-          timestamp: "2024-03-15T09:15:00Z",
-          isRead: true,
-          messageType: "text",
-        },
-        {
-          id: "3",
-          senderId: participantId,
-          recipientId: user?.id || "",
-          content:
-            "That's wonderful! June is such a beautiful time for weddings in SF. I have availability for that date. What's your venue?",
-          timestamp: "2024-03-15T09:30:00Z",
-          isRead: true,
-          messageType: "text",
-        },
-        {
-          id: "4",
-          senderId: user?.id || "",
-          recipientId: participantId,
-          content: "We're having it at the Palace of Fine Arts. The ceremony starts at 4 PM.",
-          timestamp: "2024-03-15T10:00:00Z",
+      const conv = json.conversation
+      setParticipant(conv.participant)
+      setMessages(
+        (conv.messages || []).map((m: any) => ({
+          id: m.id,
+          senderId: m.senderId,
+          recipientId: conv.participant?.id === m.senderId ? (user?.id || "") : conv.participant?.id || "",
+          content: m.content,
+          timestamp: m.timestamp,
           isRead: false,
           messageType: "text",
-        },
-        {
-          id: "5",
-          senderId: participantId,
-          recipientId: user?.id || "",
-          content:
-            "Perfect location! I've shot there many times. Let me send you my wedding package details and we can schedule a call to discuss everything.",
-          timestamp: "2024-03-15T10:30:00Z",
-          isRead: false,
-          messageType: "text",
-        },
-      ]
-
-      setParticipant(mockParticipant)
-      setMessages(mockMessages)
-    } catch (error) {
-      console.error("Failed to load conversation:", error)
+        })),
+      )
+    } catch (err) {
+      console.error("Failed to load conversation:", err)
+      setParticipant(null)
+      setMessages([])
     } finally {
       setLoading(false)
     }
   }
 
+  // new helper to upload files (reads File -> base64 -> POST /api/uploads)
+  const uploadFiles = async (files: File[]) => {
+    if (!files || files.length === 0) return []
+    const payloadFiles: { name: string; data: string }[] = []
+
+    for (const f of files) {
+      const dataUrl: string = await new Promise((res, rej) => {
+        const reader = new FileReader()
+        reader.onload = () => res(String(reader.result))
+        reader.onerror = () => rej("Failed reading file")
+        reader.readAsDataURL(f)
+      })
+      payloadFiles.push({ name: f.name, data: dataUrl })
+    }
+
+    try {
+      const res = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: payloadFiles }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        console.error("Upload failed:", json)
+        return []
+      }
+      return (json.files || []).map((f: any) => f.url)
+    } catch (err) {
+      console.error("Upload error:", err)
+      return []
+    }
+  }
+
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fList = e.target.files ? Array.from(e.target.files) : []
+    if (fList.length === 0) return
+    setSending(true)
+    try {
+      const urls = await uploadFiles(fList)
+      if (urls.length === 0) {
+        setSending(false)
+        return
+      }
+
+      // send message with attachments (no text)
+      if (!params?.id) return
+      const res = await fetch(`/api/conversations/${encodeURIComponent(params.id as string)}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "", attachments: urls }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        console.error("Send attachment failed:", json)
+        return
+      }
+      const m = json.message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: m.id,
+          senderId: m.senderId,
+          recipientId: participant?.id || "",
+          content: m.text || "",
+          timestamp: m.createdAt ?? new Date().toISOString(),
+          isRead: false,
+          messageType: "text",
+          attachments: m.attachments ?? [],
+        },
+      ])
+      // ensure we scroll
+      scrollToBottom()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSending(false)
+      // reset file input so same file can be selected again if needed
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
+  // update Send handler to support attachments in messages and to preserve attachments rendering
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newMessage.trim() || sending || !user || !participant) return
+    if ((!newMessage.trim() && !false) || sending || !user) return
+    if (!params?.id) return
 
     setSending(true)
     try {
-      const message: Message = {
-        id: Date.now().toString(),
-        senderId: user.id,
-        recipientId: participant.id,
-        content: newMessage.trim(),
-        timestamp: new Date().toISOString(),
-        isRead: false,
-        messageType: "text",
+      const res = await fetch(`/api/conversations/${encodeURIComponent(params.id as string)}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: newMessage.trim(), attachments: [] }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        console.error("Send message failed:", json)
+        return
       }
-
-      setMessages((prev) => [...prev, message])
+      const m = json.message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: m.id,
+          senderId: m.senderId,
+          recipientId: participant?.id || "",
+          content: m.text,
+          timestamp: m.createdAt ?? new Date().toISOString(),
+          isRead: false,
+          messageType: "text",
+          attachments: m.attachments ?? [],
+        },
+      ])
       setNewMessage("")
-
-      // TODO: Send message via API
-      console.log("Sending message:", message)
-    } catch (error) {
-      console.error("Failed to send message:", error)
+      scrollToBottom()
+    } catch (err) {
+      console.error("Failed to send message:", err)
     } finally {
       setSending(false)
     }
@@ -282,48 +353,38 @@ export default function ConversationPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm">
-                  <Phone className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="sm">
-                  <Video className="w-4 h-4" />
-                </Button>
-                <Button variant="ghost" size="sm">
-                  <MoreVertical className="w-4 h-4" />
-                </Button>
               </div>
             </div>
           </CardHeader>
 
           {/* Messages */}
-          <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+          <CardContent ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.map((message) => {
               const isOwn = message.senderId === user.id
               return (
                 <div key={message.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[70%] ${isOwn ? "order-2" : "order-1"}`}>
                     <div
-                      className={`rounded-2xl px-4 py-2 ${
-                        isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                      }`}
+                      className={`rounded-2xl px-4 py-2 ${isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
                     >
                       <p className="text-sm">{message.content}</p>
+
+                      {/* attachments */}
+                      {message.attachments && message.attachments.length > 0 && (
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          {message.attachments.map((att, i) => (
+                            <a key={i} href={att} target="_blank" rel="noreferrer" className="block">
+                              <img src={att} alt={`attachment-${i}`} className="w-full h-24 object-cover rounded" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div
-                      className={`flex items-center gap-1 mt-1 text-xs text-muted-foreground ${
-                        isOwn ? "justify-end" : "justify-start"
-                      }`}
-                    >
+                    <div className={`flex items-center gap-1 mt-1 text-xs text-muted-foreground ${isOwn ? "justify-end" : "justify-start"}`}>
                       <Clock className="w-3 h-3" />
                       <span>{formatMessageTime(message.timestamp)}</span>
                       {isOwn && (
-                        <div className="ml-1">
-                          {message.isRead ? (
-                            <CheckCheck className="w-3 h-3 text-blue-500" />
-                          ) : (
-                            <Check className="w-3 h-3" />
-                          )}
-                        </div>
+                        <div className="ml-1">{message.isRead ? <CheckCheck className="w-3 h-3 text-blue-500" /> : <Check className="w-3 h-3" />}</div>
                       )}
                     </div>
                   </div>
@@ -336,7 +397,8 @@ export default function ConversationPage() {
           {/* Message Input */}
           <div className="border-t p-4">
             <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="sm">
+              <input ref={fileInputRef} type="file" multiple onChange={handleFileInputChange} className="hidden" />
+              <Button type="button" variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} disabled={sending}>
                 <Paperclip className="w-4 h-4" />
               </Button>
               <Input

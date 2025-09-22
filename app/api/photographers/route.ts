@@ -16,11 +16,10 @@ export async function GET(request: NextRequest) {
     const minPrice = q.get("minPrice")
     const maxPrice = q.get("maxPrice")
 
-    // base filter: only photographers
+    // build filters
     const where: any = { role: "PHOTOGRAPHER" }
     const and: any[] = []
 
-    // keep existing filters
     if (specialty) {
       and.push({
         OR: [
@@ -41,7 +40,6 @@ export async function GET(request: NextRequest) {
       and.push({ photographerProfile: { is: { hourlyRate: priceFilter } } })
     }
 
-    // fuzzy global search across multiple fields (main search box)
     if (search) {
       const s = search.trim()
       if (s.length) {
@@ -54,7 +52,6 @@ export async function GET(request: NextRequest) {
             { photographerProfile: { is: { specialty: { contains: s } } } },
             { photographerProfile: { is: { bio: { contains: s } } } },
             { photographerProfile: { is: { location: { contains: s } } } },
-            // portfolio captions/categories
             { photographerProfile: { is: { portfolio: { some: { caption: { contains: s } } } } } },
             { photographerProfile: { is: { portfolio: { some: { category: { contains: s } } } } } },
           ],
@@ -64,7 +61,6 @@ export async function GET(request: NextRequest) {
 
     if (and.length) where.AND = and
 
-    // count + page
     const total = await prisma.user.count({ where })
 
     const users = await prisma.user.findMany({
@@ -84,9 +80,32 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "desc" },
     })
 
+    // aggregate reviews for the returned photographers
+    const userIds = users.map((u) => u.id)
+    const reviewMap = new Map<string, { sum: number; count: number }>()
+    if (userIds.length) {
+      const reviews = await prisma.review.findMany({
+        where: { booking: { is: { photographerId: { in: userIds } } } },
+        select: { rating: true, booking: { select: { photographerId: true } } },
+      })
+      reviews.forEach((r) => {
+        const pid = r.booking.photographerId
+        const cur = reviewMap.get(pid) ?? { sum: 0, count: 0 }
+        cur.sum += r.rating
+        cur.count += 1
+        reviewMap.set(pid, cur)
+      })
+    }
+
     const photographers = users.map((u) => {
       const profile = u.photographerProfile as any
-      const firstImage = profile?.portfolio?.[0]?.url || null
+      const portfolioFirst = profile?.portfolio?.[0]?.url ?? null
+      const avatar = profile?.profileImageUrl ?? null
+
+      const agg = reviewMap.get(u.id) ?? { sum: 0, count: 0 }
+      const rating_average = agg.count ? Number((agg.sum / agg.count).toFixed(1)) : 0
+      const rating_count = agg.count
+
       return {
         id: u.id,
         first_name: u.firstName,
@@ -94,9 +113,10 @@ export async function GET(request: NextRequest) {
         specialty: profile?.specialty ?? u.specialty ?? null,
         location: profile?.location ?? null,
         hourly_rate: profile?.hourlyRate ?? null,
-        rating_average: 0,
-        rating_count: 0,
-        profile_image_url: firstImage ?? "/placeholder.svg",
+        rating_average,
+        rating_count,
+        profile_image_url: avatar ?? "/placeholder.svg",
+        cover_image_url: portfolioFirst ?? "/placeholder.svg",
         is_available: true,
       }
     })

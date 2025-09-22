@@ -6,7 +6,7 @@ interface ApiResponse<T = any> {
   message?: string
 }
 
-class ApiClient {
+export class ApiClient {
   private baseUrl: string
 
   constructor() {
@@ -114,25 +114,39 @@ class ApiClient {
   }
 
   // Booking methods
-  async createBooking(bookingData: {
+  async createBooking(payload: {
     photographerId: string
-    packageId?: string
-    eventDate: string
-    eventTime: string
-    duration: number
-    location: string
-    eventType: string
-    specialRequests?: string
-    totalAmount: number
+    briefId?: string | null
+    startAt: string
+    endAt: string
+    price?: number | null
   }) {
-    return this.request("/bookings", {
+    return await this.request("/bookings", {
       method: "POST",
-      body: JSON.stringify(bookingData),
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async createConversation(payload: { participantId: string; bookingId?: string | null }) {
+    return await this.request("/conversations", {
+      method: "POST",
+      body: JSON.stringify(payload),
     })
   }
 
   async getBookings() {
     return this.request("/bookings")
+  }
+
+  async canReviewPhotographer(photographerId: string) {
+    return await this.request(`/reviews/can-review?photographerId=${encodeURIComponent(photographerId)}`)
+  }
+
+  async createReview(payload: { bookingId: string; rating: number; comment?: string | null }) {
+    return await this.request("/reviews", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
   }
 }
 

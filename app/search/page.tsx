@@ -19,6 +19,7 @@ interface Photographer {
   rating_average: number
   rating_count: number
   profile_image_url: string
+  cover_image_url?: string
   is_available: boolean
 }
 
@@ -48,6 +49,7 @@ export default function SearchPage() {
       if (response.data) {
         setPhotographers(response.data.photographers || [])
         setPagination(response.data.pagination || pagination)
+        console.log("Fetched photographers:", response.data.photographers)
       } else {
         setError(response.error || "Failed to fetch photographers")
       }
@@ -60,6 +62,7 @@ export default function SearchPage() {
 
   useEffect(() => {
     fetchPhotographers()
+
   }, [])
 
   const handleFiltersChange = (newFilters: any) => {
@@ -110,8 +113,10 @@ export default function SearchPage() {
                       rating: photographer.rating_average,
                       reviewCount: photographer.rating_count,
                       hourlyRate: photographer.hourly_rate,
+                      // avatar for avatar slot
                       profileImage: photographer.profile_image_url,
-                      portfolioImages: ["/photography-portfolio.png"],
+                      // use the first portfolio image as the cover; fallback to placeholder
+                      portfolioImages: [photographer.cover_image_url || "/photography-portfolio.png"],
                       isAvailable: photographer.is_available,
                     }}
                   />

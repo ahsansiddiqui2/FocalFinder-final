@@ -42,62 +42,37 @@ export default function MessagesPage() {
     if (user) {
       loadConversations()
     }
-  }, [user, authLoading, router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authLoading])
 
   const loadConversations = async () => {
     setLoading(true)
     try {
-      // Mock data - replace with actual API call
-      const mockConversations: Conversation[] = [
-        {
-          id: "1",
-          participantId: "photographer-1",
-          participantName: "Sarah Chen",
-          participantImage: "/professional-photographer-woman-portrait.png",
-          participantRole: "photographer",
-          lastMessage: "Thank you for your interest! I'd love to discuss your wedding photography needs.",
-          lastMessageTime: "2024-03-15T10:30:00Z",
-          unreadCount: 2,
-          isOnline: true,
-          bookingId: "booking-1",
-          eventType: "Wedding Photography",
-        },
-        {
-          id: "2",
-          participantId: "client-1",
-          participantName: "Jessica Martinez",
-          participantImage: "/placeholder.svg",
-          participantRole: "client",
-          lastMessage: "Perfect! Looking forward to the session next week.",
-          lastMessageTime: "2024-03-14T16:45:00Z",
-          unreadCount: 0,
-          isOnline: false,
-          bookingId: "booking-2",
-          eventType: "Portrait Session",
-        },
-        {
-          id: "3",
-          participantId: "photographer-2",
-          participantName: "Marcus Rodriguez",
-          participantImage: "/professional-photographer-man-portrait.png",
-          participantRole: "photographer",
-          lastMessage: "I can definitely work with your budget. Let me send you a custom package.",
-          lastMessageTime: "2024-03-13T14:20:00Z",
-          unreadCount: 1,
-          isOnline: true,
-          eventType: "Fashion Photography",
-        },
-      ]
-
-      // Filter based on user role
-      const filteredConversations =
-        user?.role === "client"
-          ? mockConversations.filter((c) => c.participantRole === "photographer")
-          : mockConversations.filter((c) => c.participantRole === "client")
-
-      setConversations(filteredConversations)
-    } catch (error) {
-      console.error("Failed to load conversations:", error)
+      const res = await fetch("/api/conversations", { credentials: "include" })
+      const json = await res.json()
+      if (res.ok && Array.isArray(json.conversations)) {
+        setConversations(
+          json.conversations.map((c: any) => ({
+            id: c.id,
+            participantId: c.participantId,
+            participantName: c.participantName,
+            participantImage: c.participantImage,
+            participantRole: c.participantRole,
+            lastMessage: c.lastMessage,
+            lastMessageTime: c.lastMessageTime,
+            unreadCount: c.unreadCount ?? 0,
+            isOnline: false, // add real presence later
+            bookingId: c.bookingId,
+            eventType: c.eventType,
+          })),
+        )
+      } else {
+        console.error("Failed to load conversations:", json)
+        setConversations([])
+      }
+    } catch (err) {
+      console.error("Failed to load conversations:", err)
+      setConversations([])
     } finally {
       setLoading(false)
     }
@@ -175,7 +150,7 @@ export default function MessagesPage() {
                     {filteredConversations.map((conversation) => (
                       <button
                         key={conversation.id}
-                        onClick={() => router.push(`/messages/${conversation.participantId}`)}
+                        onClick={() => router.push(`/messages/${conversation.id}`)}
                         className="w-full p-4 text-left hover:bg-muted/50 transition-colors border-b last:border-b-0"
                       >
                         <div className="flex items-start gap-3">

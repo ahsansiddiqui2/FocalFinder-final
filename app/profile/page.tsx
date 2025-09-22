@@ -54,6 +54,8 @@ export default function PhotographerProfilePage() {
   const [servicePackages, setServicePackages] = useState<ServicePackage[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [uploading, setUploading] = useState(false)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
 
   // Profile form state
   const [profileData, setProfileData] = useState({
@@ -104,6 +106,7 @@ export default function PhotographerProfilePage() {
         }))
       }
       if (json?.profile) {
+        setAvatarUrl(json.profile.profileImageUrl ?? null)
         setProfileData((prev) => ({
           ...prev,
           bio: json.profile.bio ?? "",
@@ -367,6 +370,50 @@ export default function PhotographerProfilePage() {
     }
   }
 
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setAvatarUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", files[0])
+      const res = await fetch("/api/photographer/profile/avatar", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      })
+      const json = await res.json()
+      if (res.ok && json.profile) {
+        setAvatarUrl(json.profile.profileImageUrl ?? null)
+      } else {
+        console.error("Avatar upload failed:", json)
+      }
+      ;(e.target as HTMLInputElement).value = ""
+    } catch (err) {
+      console.error("Avatar upload error:", err)
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleRemoveAvatar = async () => {
+    if (!confirm("Remove profile picture?")) return
+    try {
+      const res = await fetch("/api/photographer/profile/avatar", {
+        method: "DELETE",
+        credentials: "include",
+      })
+      const json = await res.json()
+      if (res.ok && json.profile) {
+        setAvatarUrl(null)
+      } else {
+        console.error("Remove avatar failed:", json)
+      }
+    } catch (err) {
+      console.error("Remove avatar error:", err)
+    }
+  }
+
   if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -395,6 +442,25 @@ export default function PhotographerProfilePage() {
       <Header />
 
       <main className="container mx-auto px-4 py-8">
+        {/* <div className="mb-6 flex items-center gap-4">
+          <div className="w-24 h-24 rounded-full overflow-hidden bg-muted flex items-center justify-center">
+            <img src={avatarUrl ?? "/placeholder-avatar.png"} alt="Profile" className="w-full h-full object-cover" />
+          </div>
+          <div className="flex gap-2 items-center">
+            <input id="avatar-upload" type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+            <label htmlFor="avatar-upload">
+              <Button variant="outline" disabled={avatarUploading}>
+                {avatarUploading ? "Uploading..." : "Change Picture"}
+              </Button>
+            </label>
+            {avatarUrl && (
+              <Button variant="ghost" onClick={handleRemoveAvatar}>
+                Remove
+              </Button>
+            )}
+          </div>
+        </div> */}
+
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-serif font-bold text-foreground mb-2">Photographer Dashboard</h1>
           <p className="text-muted-foreground">Manage your profile, portfolio, and bookings</p>
@@ -425,6 +491,26 @@ export default function PhotographerProfilePage() {
         {/* Profile Settings Tab */}
         {activeTab === "profile" && (
           <Card>
+            <CardContent>
+              <div className="mb-6 flex items-center gap-4">
+                <div className="w-24 h-24 rounded-full overflow-hidden bg-muted flex items-center justify-center">
+                  <img src={avatarUrl ?? "/profile-placeholder  .png"} alt="Profile" className="w-full h-full object-cover" />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <input id="avatar-upload" type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                  <Button asChild variant="outline" disabled={avatarUploading}>
+                    <label htmlFor="avatar-upload" className="cursor-pointer">
+                      {avatarUploading ? "Uploading..." : "Change Picture"}
+                    </label>
+                  </Button>
+                  {avatarUrl && (
+                    <Button variant="ghost" onClick={handleRemoveAvatar}>
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardContent>
             <CardHeader>
               <CardTitle>Profile Information</CardTitle>
               <CardDescription>Update your professional profile and settings</CardDescription>

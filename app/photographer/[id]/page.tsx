@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Header } from "@/components/layout/header"
 import { Footer } from "@/components/layout/footer"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -60,6 +60,11 @@ export default function PhotographerGigPage() {
   const [photographer, setPhotographer] = useState<PhotographerGig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [canReview, setCanReview] = useState(false)
+  const [bookingToReviewId, setBookingToReviewId] = useState<string | null>(null)
+  const [reviewRating, setReviewRating] = useState<number>(5)
+  const [reviewComment, setReviewComment] = useState<string>("")
+  const [submittingReview, setSubmittingReview] = useState(false)
   const [selectedPackage, setSelectedPackage] = useState(0)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [isFavorited, setIsFavorited] = useState(false)
@@ -76,6 +81,20 @@ export default function PhotographerGigPage() {
       const response = await apiClient.getPhotographer(id)
       if (response.data?.photographer) {
         setPhotographer(response.data.photographer)
+        // check if current user can leave a review for this photographer
+        try {
+          const cr = await apiClient.canReviewPhotographer(id)
+          if (!cr.error && cr.data?.canReview) {
+            setCanReview(true)
+            setBookingToReviewId(cr.data.bookingId ?? null)
+          } else {
+            setCanReview(false)
+            setBookingToReviewId(null)
+          }
+        } catch (e) {
+          setCanReview(false)
+          setBookingToReviewId(null)
+        }
       } else {
         setError(response.error || "Photographer not found")
       }
@@ -93,10 +112,20 @@ export default function PhotographerGigPage() {
     }
   }
 
-  const handleContactMe = () => {
-    if (photographer) {
-      // Navigate to messaging page
-      router.push(`/messages/${photographer.id}`)
+  const handleContactMe = async () => {
+    if (!photographer) return
+    try {
+      // create or reuse conversation with this photographer
+      const res = await apiClient.createConversation({ participantId: photographer.id })
+      if (!res.error && res.data?.conversation?.id) {
+        router.push(`/messages/${res.data.conversation.id}`)
+      } else {
+        // fallback to messages list
+        router.push("/messages")
+      }
+    } catch (err) {
+      console.error("Failed to create conversation:", err)
+      router.push("/messages")
     }
   }
 
@@ -143,7 +172,6 @@ export default function PhotographerGigPage() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-
       <main className="container mx-auto px-4 py-8">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
@@ -287,6 +315,7 @@ export default function PhotographerGigPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Reviews ({photographer.reviewCount})</CardTitle>
+                <CardDescription>What clients say about {photographer.firstName}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -324,9 +353,77 @@ export default function PhotographerGigPage() {
                     </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+                {/* Review form - only visible when client is eligible */}
+                {canReview && bookingToReviewId && (
+                  <div className="mt-4">
+                    <h4 className="font-medium mb-2">Leave a review</h4>
+                    <div className="grid grid-cols-1 gap-2">
+                      <div>
+                        <label className="text-sm block mb-1">Rating</label>
+                        <select
+                          value={reviewRating}
+                          onChange={(e) => setReviewRating(Number(e.target.value))}
+                          className="border rounded p-2"
+                        >
+                          {[5, 4, 3, 2, 1].map((r) => (
+                            <option key={r} value={r}>
+                              {r} star{r > 1 ? "s" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-sm block mb-1">Comment</label>
+                        <textarea
+                          value={reviewComment}
+                          onChange={(e) => setReviewComment(e.target.value)}
+                          rows={4}
+                          className="w-full border rounded p-2"
+                          placeholder="Share your experience..."
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          className="bg-primary"
+                          disabled={submittingReview}
+                          onClick={async () => {
+                            setSubmittingReview(true)
+                            try {
+                              const res = await apiClient.createReview({
+                                bookingId: bookingToReviewId!,
+                                rating: reviewRating,
+                                comment: reviewComment || null,
+                              })
+                              if (res.error) {
+                                alert(res.error)
+                              } else {
+                                // refresh photographer to show new review
+                                await fetchPhotographer(photographer.id)
+                                setCanReview(false)
+                                setBookingToReviewId(null)
+                                setReviewComment("")
+                                setReviewRating(5)
+                              }
+                            } catch (e) {
+                              console.error(e)
+                              alert("Failed to submit review")
+                            } finally {
+                              setSubmittingReview(false)
+                            }
+                          }}
+                        >
+                          {submittingReview ? "Submitting..." : "Submit Review"}
+                        </Button>
+                        <Button variant="outline" onClick={() => { setCanReview(false); setBookingToReviewId(null) }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+               </CardContent>
+             </Card>
+           </div>
 
           {/* Right Column - Pricing */}
           <div className="space-y-6">
@@ -416,7 +513,6 @@ export default function PhotographerGigPage() {
           </div>
         </div>
       </main>
-
       <Footer />
     </div>
   )

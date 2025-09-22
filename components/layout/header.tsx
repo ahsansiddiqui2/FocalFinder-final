@@ -12,15 +12,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { User, Settings, LogOut } from "lucide-react"
+import { User, Settings, LogOut, MessageSquare } from "lucide-react"
 
 export function Header() {
   const { user, logout, loading } = useAuth()
   const router = useRouter()
+  const role = (user as any)?.role
 
   const handleLogout = async () => {
     await logout()
     router.push("/")
+  }
+
+  const goToProfileOrDashboard = () => {
+    if (role === "photographer") router.push("/profile")
+    else router.push("/dashboard")
   }
 
   return (
@@ -42,9 +48,9 @@ export function Header() {
           <Link href="/about" className="text-foreground hover:text-primary transition-colors">
             About Us
           </Link>
-          <Link href="/pricing" className="text-foreground hover:text-primary transition-colors">
+          {/* <Link href="/pricing" className="text-foreground hover:text-primary transition-colors">
             Pricing
-          </Link>
+          </Link> */}
         </nav>
 
         {/* Auth Section */}
@@ -52,47 +58,77 @@ export function Header() {
           {loading ? (
             <div className="w-8 h-8 bg-muted rounded-full animate-pulse" />
           ) : user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src="/placeholder.svg" alt={user.firstName} />
-                    <AvatarFallback>
-                      {user.firstName[0]}
-                      {user.lastName[0]}
-                    </AvatarFallback>
-                  </Avatar>
+            <>
+              {/* quick action icons */}
+              <div className="hidden sm:flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={goToProfileOrDashboard}
+                  aria-label="Profile"
+                  title={role === "photographer" ? "Profile" : "Dashboard"}
+                >
+                  <User className="w-4 h-4" />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end" forceMount>
-                <div className="flex items-center justify-start gap-2 p-2">
-                  <div className="flex flex-col space-y-1 leading-none">
-                    <p className="font-medium">
-                      {user.firstName} {user.lastName}
-                    </p>
-                    <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => router.push("/messages")}
+                  aria-label="Chats"
+                  title="Chats"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                </Button>
+
+                <Button variant="ghost" size="sm" onClick={handleLogout} aria-label="Logout" title="Logout">
+                  <LogOut className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage
+                        src={(user as any)?.photographerProfile?.profileImageUrl ?? (user as any)?.profileImageUrl ?? "/placeholder.svg"}
+                        alt={user.firstName}
+                      />
+                      <AvatarFallback>
+                        {user.firstName[0]}
+                        {user.lastName[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="end" forceMount>
+                  <div className="flex items-center justify-start gap-2 p-2">
+                    <div className="flex flex-col space-y-1 leading-none">
+                      <p className="font-medium">
+                        {user.firstName} {user.lastName}
+                      </p>
+                      <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>
+                    </div>
                   </div>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href="/dashboard" className="cursor-pointer">
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={goToProfileOrDashboard} className="cursor-pointer">
                     <User className="mr-2 h-4 w-4" />
-                    Dashboard
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/settings" className="cursor-pointer">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    {role === "photographer" ? "Profile" : "Dashboard"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings" className="cursor-pointer">
+                      <Settings className="mr-2 h-4 w-4" />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Log out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           ) : (
             <>
               <Button

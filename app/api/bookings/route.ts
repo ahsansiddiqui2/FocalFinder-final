@@ -1,114 +1,239 @@
 import { type NextRequest, NextResponse } from "next/server"
+import jwt from "jsonwebtoken"
+import { z } from "zod"
+import { prisma } from "../../../lib/prisma"
+
+export const runtime = "nodejs"
+
+function getTokenFromReq(req: NextRequest) {
+  return req.cookies.get("auth-token")?.value
+}
+function verifyJwt(token: string) {
+  const secret = process.env.JWT_SECRET
+  if (!secret) throw new Error("JWT_SECRET not set")
+  return jwt.verify(token, secret) as any
+}
+
+const createSchema = z.object({
+  photographerId: z.string().uuid(),
+  briefId: z.string().uuid().optional().nullable(),
+  startAt: z.string().refine((s) => !Number.isNaN(Date.parse(s)), { message: "Invalid startAt" }),
+  endAt: z.string().refine((s) => !Number.isNaN(Date.parse(s)), { message: "Invalid endAt" }),
+  price: z.number().optional().nullable(),
+})
 
 export async function GET(request: NextRequest) {
   try {
-    console.log("[v0] GET /api/bookings - Starting simplified request")
+    const token = getTokenFromReq(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const mockBookings = [
-      {
-        id: "1",
-        client_id: "test-user",
-        photographer_id: "1",
-        event_date: "2024-06-15",
-        event_time: "14:00",
-        duration: 6,
-        location: "Golden Gate Park, San Francisco",
-        event_type: "Wedding",
-        total_amount: 1200,
-        status: "confirmed",
-        created_at: "2024-01-15T00:00:00Z",
-        photographer_first_name: "Sarah",
-        photographer_last_name: "Chen",
-        photographer_image: "/professional-photographer-woman-portrait.png",
-      },
-      {
-        id: "2",
-        client_id: "test-user",
-        photographer_id: "2",
-        event_date: "2024-07-20",
-        event_time: "10:00",
-        duration: 4,
-        location: "Central Park, New York",
-        event_type: "Portrait Session",
-        total_amount: 800,
-        status: "pending",
-        created_at: "2024-01-20T00:00:00Z",
-        photographer_first_name: "Marcus",
-        photographer_last_name: "Rodriguez",
-        photographer_image: "/professional-photographer-man-portrait.png",
-      },
-    ]
+    let payload: any
+    try {
+      payload = verifyJwt(token)
+    } catch {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    console.log("[v0] Returning", mockBookings.length, "bookings")
-
-    return new NextResponse(JSON.stringify({ bookings: mockBookings }), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
+    // fetch bookings where user is client or photographer
+    const userId = payload.userId
+    const asClient = await prisma.booking.findMany({
+      where: { clientId: userId },
+      include: {
+        photographer: true,
+        client: true,
+        brief: true,
       },
+      orderBy: { createdAt: "desc" },
+      take: 200,
     })
-  } catch (error) {
-    console.error("[v0] GET /api/bookings error:", error)
-
-    return new NextResponse(
-      JSON.stringify({
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : "Unknown error",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
+    const asPhotog = await prisma.booking.findMany({
+      where: { photographerId: userId },
+      include: {
+        photographer: true,
+        client: true,
+        brief: true,
       },
-    )
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    })
+
+    // merge and dedupe by id
+    const map = new Map<string, any>()
+    ;[...asClient, ...asPhotog].forEach((b) => map.set(b.id, b))
+
+    const list = Array.from(map.values()).map((b: any) => ({
+      id: b.id,
+      event_date: b.startAt?.toISOString?.() ?? new Date(b.startAt).toISOString(),
+      event_time: new Date(b.startAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      location:
+        typeof b.brief?.location === "string"
+          ? b.brief.location
+          : b.brief?.location ?? "",
+      event_type: b.brief?.title ?? "Photography session",
+      total_amount: Number(b.price ?? 0),
+      status: String(b.status).toLowerCase(),
+      photographer_first_name: b.photographer?.firstName ?? null,
+      photographer_last_name: b.photographer?.lastName ?? null,
+      photographer_image:
+        // prefer photographer profile avatar if available
+        (b.photographer as any)?.photographerProfile?.profileImageUrl ??
+        (b.photographer as any)?.profileImageUrl ??
+        null,
+      client_first_name: b.client?.firstName ?? null,
+      client_last_name: b.client?.lastName ?? null,
+    }))
+
+    return NextResponse.json({ bookings: list })
+  } catch (err: any) {
+    console.error("GET /api/bookings error:", err)
+    return NextResponse.json({ error: err?.message || "Internal server error" }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[v0] POST /api/bookings - Starting simplified request")
+    const token = getTokenFromReq(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const body = await request.json()
-    console.log("[v0] Request body received:", body)
-
-    const newBooking = {
-      id: Date.now().toString(),
-      client_id: "test-user",
-      ...body,
-      status: "pending",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    let payload: any
+    try {
+      payload = verifyJwt(token)
+    } catch {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    console.log("[v0] Booking created successfully:", newBooking.id)
+    // only clients create bookings
+    if (payload.role !== "CLIENT" && payload.role !== "client") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
 
-    return new NextResponse(
-      JSON.stringify({
-        booking: newBooking,
-        message: "Booking request sent successfully",
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    )
-  } catch (error) {
-    console.error("[v0] POST /api/bookings error:", error)
+    const body = await request.json()
+    const data = createSchema.parse(body)
 
-    return new NextResponse(
-      JSON.stringify({
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : "Unknown error",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
+    // basic existence checks
+    const photog = await prisma.user.findUnique({ where: { id: data.photographerId } })
+    if (!photog || photog.role !== "PHOTOGRAPHER") {
+      return NextResponse.json({ error: "Photographer not found" }, { status: 404 })
+    }
+
+    // optional: ensure brief exists if provided
+    let brief = null
+    if (data.briefId) {
+      brief = await prisma.brief.findUnique({ where: { id: data.briefId } })
+      if (!brief) return NextResponse.json({ error: "Brief not found" }, { status: 404 })
+    }
+
+    const requestedStart = new Date(data.startAt)
+    const requestedEnd = new Date(data.endAt)
+
+    // check for conflicting bookings
+    const conflictingBookings = await prisma.booking.findMany({
+      where: {
+        photographerId: data.photographerId,
+        OR: [
+          {
+            startAt: {
+              lte: requestedStart,
+            },
+            endAt: {
+              gte: requestedStart,
+            },
+          },
+          {
+            startAt: {
+              lte: requestedEnd,
+            },
+            endAt: {
+              gte: requestedEnd,
+            },
+          },
+          {
+            startAt: {
+              gte: requestedStart,
+            },
+            endAt: {
+              lte: requestedEnd,
+            },
+          },
+        ],
       },
-    )
+    })
+
+    if (conflictingBookings.length > 0) {
+      return NextResponse.json(
+        { error: "Requested time slot conflicts with existing bookings" },
+        { status: 409 }
+      )
+    }
+
+    const booking = await prisma.booking.create({
+      data: {
+        photographerId: data.photographerId,
+        clientId: payload.userId,
+        briefId: data.briefId ?? null,
+        startAt: requestedStart,
+        endAt: requestedEnd,
+        price: data.price ?? 0,
+        status: "PENDING",
+      },
+    })
+
+    // ensure a conversation exists for this booking between client and photographer (reuse if exists)
+    let conversation = null
+    try {
+      // prefer conversation linked to this booking
+      conversation = await prisma.conversation.findUnique({
+        where: { bookingId: booking.id },
+        include: { participants: { include: { user: { include: { photographerProfile: true } } } } },
+      })
+      if (!conversation) {
+        // check if a conversation already exists between the two users
+        const existing = await prisma.conversation.findFirst({
+          where: {
+            AND: [
+              { participants: { some: { userId: booking.clientId } } },
+              { participants: { some: { userId: booking.photographerId } } },
+            ],
+          },
+          include: { participants: { include: { user: { include: { photographerProfile: true } } } } },
+        })
+        if (existing) {
+          conversation = existing
+          // link to booking if needed
+          try {
+            await prisma.conversation.update({ where: { id: existing.id }, data: { bookingId: booking.id } })
+            await prisma.booking.update({ where: { id: booking.id }, data: { conversation: { connect: { id: existing.id } } } })
+          } catch (linkErr) {
+            console.warn("failed linking existing conversation to booking:", linkErr)
+          }
+        } else {
+          conversation = await prisma.conversation.create({
+            data: {
+              bookingId: booking.id,
+              participants: {
+                create: [
+                  { user: { connect: { id: booking.clientId } } },
+                  { user: { connect: { id: booking.photographerId } } },
+                ],
+              },
+            },
+            include: { participants: { include: { user: { include: { photographerProfile: true } } } } },
+          })
+          // link conversation to booking
+          await prisma.booking.update({ where: { id: booking.id }, data: { conversation: { connect: { id: conversation.id } } } })
+        }
+      }
+    } catch (convErr) {
+      console.error("Failed to ensure/create conversation for booking:", convErr)
+    }
+
+    // return booking and conversation (if any)
+    return NextResponse.json({ booking, conversation }, { status: 201 })
+  } catch (err: any) {
+    if (err?.name === "ZodError") {
+      return NextResponse.json({ error: err.errors?.[0]?.message ?? "Invalid payload" }, { status: 400 })
+    }
+    console.error("POST /api/bookings error:", err)
+    return NextResponse.json({ error: err?.message || "Internal server error" }, { status: 500 })
   }
 }
